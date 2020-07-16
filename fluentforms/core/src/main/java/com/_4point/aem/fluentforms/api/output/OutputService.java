@@ -15,7 +15,9 @@ import com._4point.aem.fluentforms.api.Transformable;
 import com.adobe.fd.output.api.AcrobatVersion;
 import com.adobe.fd.output.api.PaginationOverride;
 
-public interface OutputService {
+public interface
+
+OutputService {
 
 	Document generatePDFOutput(Document template, Document data, PDFOutputOptions pdfOutputOptions) throws OutputServiceException;
 

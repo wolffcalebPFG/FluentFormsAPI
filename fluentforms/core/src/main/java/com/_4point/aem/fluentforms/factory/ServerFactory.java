@@ -1,5 +1,8 @@
 package com._4point.aem.fluentforms.factory;
 
+import com._4point.aem.fluentforms.api.generate.GeneratePDFService;
+import com._4point.aem.fluentforms.impl.generate.AdobeGeneratePDFServiceAdapter;
+import com._4point.aem.fluentforms.impl.generate.GeneratePDFServiceImpl;
 import org.apache.sling.api.resource.ResourceResolver;
 
 import com._4point.aem.fluentforms.api.DocumentFactory;
@@ -31,5 +34,10 @@ public class ServerFactory {
 	
 	public static DocumentFactory getDefaultDocumentFactory() {
 		return AdobeDocumentFactoryImpl.getFactory();
+	}
+
+
+	public static GeneratePDFService getGeneratePDFService(com.adobe.pdfg.service.api.GeneratePDFService adobeGeneratePDFService) {
+		return new GeneratePDFServiceImpl(new AdobeGeneratePDFServiceAdapter(adobeGeneratePDFService), UsageContext.SERVER_SIDE);
 	}
 }

@@ -9,6 +9,8 @@ import com._4point.aem.fluentforms.api.generate.GeneratePDFService.GeneratePDFSe
 import com._4point.aem.fluentforms.impl.SimpleDocumentFactoryImpl;
 import com._4point.aem.fluentforms.impl.generate.TraditionalGeneratePDFService;
 import org.glassfish.jersey.media.multipart.FormDataMultiPart;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.ws.rs.client.Client;
 import javax.ws.rs.client.WebTarget;
@@ -17,10 +19,14 @@ import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.Reader;
+import java.nio.charset.StandardCharsets;
 import java.util.function.Supplier;
 
 public class RestServicesGeneratePDFServiceAdapter extends RestServicesServiceAdapter implements TraditionalGeneratePDFService {
 
+    private static final Logger log = LoggerFactory.getLogger(RestServicesGeneratePDFServiceAdapter.class);
 
     private static final String CREATE_PDF_2_PATH="/services/GeneratePDFService/GeneratePDF";
 
@@ -38,26 +44,32 @@ public class RestServicesGeneratePDFServiceAdapter extends RestServicesServiceAd
             throw new GeneratePDFServiceException("Internal Error, must provide document and its dataformat");
         }
 
+        //System.out.println("SettingsDoc is null" + settingsDoc + " xmpDoc is null" + xmpDoc);
+
         WebTarget createPDF2Target = baseTarget.path(CREATE_PDF_2_PATH);
         try (final FormDataMultiPart multipart = new FormDataMultiPart()) {
             multipart.field("inputDoc", inputDoc.getInputStream(), APPLICATION_PDF)
                     .field("inputFileExtension", inputFileExtension)
                     .field("fileTypeSettings", fileTypeSettings)
                     .field("pdfSettings", pdfSettings)
-                    .field("securitySettings", securitySettings)
-                    .field("settingsDoc", settingsDoc.getInputStream(), APPLICATION_PDF)
-                    .field("xmpDoc", xmpDoc.getInputStream(), APPLICATION_PDF);
+                    .field("securitySettings", securitySettings);
+                    //.field("settingsDoc", settingsDoc.getInputStream(), APPLICATION_PDF)
+                    //.field("xmpDoc", xmpDoc.getInputStream(), APPLICATION_PDF);
 
+        log.info("before post to server");
 
         Response result = postToServer(createPDF2Target, multipart, MediaType.APPLICATION_XML_TYPE);//xml
         Response.StatusType resultStatus = result.getStatusInfo();
 
+        log.info("after post to server");
+
         if (!Response.Status.Family.SUCCESSFUL.equals(resultStatus.getFamily())) {
-            String message = "Call to server failed, statusCode='" + resultStatus.getStatusCode() + "', reason='" + resultStatus.getReasonPhrase() + "'.";
-            if (result.hasEntity()) {
-                InputStream entityStream = (InputStream) result.getEntity();
-                message += "\n" + inputStreamtoString(entityStream);
-            }
+        String message = "Call to server failed, statusCode='" + resultStatus.getStatusCode() + "', reason='" + resultStatus.getReasonPhrase() + "'.";
+        if (result.hasEntity()) {
+            //log.info("before getting entity with unsuccessful response status");
+            InputStream entityStream = (InputStream) result.getEntity();
+            //log.info("after getting entity with unsuccessful response status");
+            message += "\n" + inputStreamtoString(entityStream); }
             throw new GeneratePDFServiceException(message);
         }
         if (resultStatus.getStatusCode() != Response.Status.NO_CONTENT.getStatusCode()) {
@@ -71,15 +83,40 @@ public class RestServicesGeneratePDFServiceAdapter extends RestServicesServiceAd
                         + (responseContentType != null ? "content-type='" + responseContentType + "'"
                         : "content-type was null")
                         + ".";
+                //log.info("before getting entity with null content type");
                 InputStream entityStream = (InputStream) result.getEntity();
+                //log.info("after getting entity  with null content type");
                 msg += "\n" + inputStreamtoString(entityStream);
                 throw new GeneratePDFServiceException(msg);
             }
 
-            Document resultDoc = SimpleDocumentFactoryImpl.getFactory().create((InputStream) result.getEntity());
-            CreatePDFResult createPDFResultDoc = (CreatePDFResult) resultDoc;
-            return createPDFResultDoc;
+            //Document resultDoc = SimpleDocumentFactoryImpl.getFactory().create((InputStream) result.getEntity());
+
+            final int bufferSize = 1024;
+            final char[] buffer = new char[bufferSize];
+            final StringBuilder out = new StringBuilder();
+            Reader in = new InputStreamReader((InputStream) result.getEntity(), StandardCharsets.UTF_8);
+            int charsRead;
+            while((charsRead = in.read(buffer, 0, buffer.length)) > 0) {
+                out.append(buffer, 0, charsRead);
+            }
+
+            log.info("before get entity as string");
+            //String s1 = result.readEntity(String.class);
+            //log.info("after read S1..." + s1);
+            //String s2 = result.toString();
+            //log.info("after read S2..." + s2);
+            String s3 = result.getEntity().toString();
+            log.info("after read S3..." + s3);
+
+
+
+
+
+
+            return null;
         } else {
+            log.info("Error after read...");
             return (CreatePDFResult) SimpleDocumentFactoryImpl.emptyDocument();
         }
 

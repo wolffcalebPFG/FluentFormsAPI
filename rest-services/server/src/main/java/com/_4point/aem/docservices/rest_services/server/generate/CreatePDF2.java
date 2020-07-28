@@ -1,12 +1,19 @@
 package com._4point.aem.docservices.rest_services.server.generate;
 
+import com._4point.aem.docservices.rest_services.server.AcceptHeaders;
+import com._4point.aem.docservices.rest_services.server.ContentType;
 import com._4point.aem.docservices.rest_services.server.Exceptions;
+import com._4point.aem.docservices.rest_services.server.ServletUtils;
+import com._4point.aem.docservices.rest_services.server.forms.RenderPdfForm;
 import com._4point.aem.fluentforms.api.Document;
 import com._4point.aem.fluentforms.api.DocumentFactory;
+import com._4point.aem.fluentforms.api.generate.CreatePDFResult;
 import com._4point.aem.fluentforms.api.generate.GeneratePDFService;
 import com._4point.aem.fluentforms.impl.generate.AdobeGeneratePDFServiceAdapter;
 import com._4point.aem.fluentforms.impl.generate.GeneratePDFServiceImpl;
 import com._4point.aem.fluentforms.impl.generate.TraditionalGeneratePDFService;
+import org.apache.commons.collections.CollectionUtils;
+import org.apache.commons.io.IOUtils;
 import org.apache.sling.api.SlingHttpServletRequest;
 import org.apache.sling.api.SlingHttpServletResponse;
 import org.apache.sling.api.resource.ResourceResolver;
@@ -18,10 +25,21 @@ import org.osgi.service.component.annotations.Component;
 import org.osgi.service.component.annotations.Reference;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.w3c.dom.Attr;
+import org.w3c.dom.Element;
 
 import javax.servlet.Servlet;
 import javax.servlet.ServletException;
+import javax.xml.parsers.DocumentBuilder;
+import javax.xml.parsers.DocumentBuilderFactory;
+import javax.xml.parsers.ParserConfigurationException;
+import javax.xml.transform.*;
+import javax.xml.transform.dom.DOMSource;
+import javax.xml.transform.stream.StreamResult;
 import java.io.IOException;
+import java.io.StringWriter;
+import java.util.Base64;
+import java.util.List;
 import java.util.function.Supplier;
 
 import static com._4point.aem.docservices.rest_services.server.FormParameters.getMandatoryParameter;
@@ -64,17 +82,133 @@ public class CreatePDF2 extends SlingAllMethodsServlet {
     }
 
     private void processInput(SlingHttpServletRequest request, SlingHttpServletResponse response) throws Exceptions.BadRequestException, Exceptions.InternalServerErrorException, Exceptions.NotAcceptableException {
+
+        log.info("In REST Services Client processInput.");
+
         GeneratePDFService generatePDFService = new GeneratePDFServiceImpl(generatePDFServiceFactory.get(), null);
 
-        Document inputDoc;
-        String inputFileExtension;
-        String fileTypeSettings;
-        String pdfSettings;
-        String securitySettings;
-        Document settingsDoc;
-        Document xmpDoc;
+        CreatePDF2.ReaderExtensionsParameters reqParameters = CreatePDF2.ReaderExtensionsParameters.readReaderExtensionsParameters(request);	// TODO: Make the validation of XML a config parameter.
 
+        Document inputDoc = docFactory.create(reqParameters.getInputDoc());
+        String inputFileExtension = reqParameters.getInputFileExtension();
+        String fileTypeSettings = reqParameters.getFileTypeSettings();
+        String pdfSettings = reqParameters.getPDFSettings();
+        String securitySettings = reqParameters.getSecuritySettings();
+        Document settingsDoc = docFactory.create(reqParameters.getSettingsDoc());
+        Document xmpDoc = docFactory.create(reqParameters.getXMPDoc());
 
+        /*CreatePDFResult result = null;
+        try {
+            log.info("before the AEM call");
+            result = generatePDFService.createPDF2(inputDoc, inputFileExtension, fileTypeSettings, pdfSettings, securitySettings, settingsDoc, xmpDoc);
+            log.info("after the AEM call");
+        } catch (GeneratePDFService.GeneratePDFServiceException e) {
+            throw new Exceptions.InternalServerErrorException("Error calling Adobe API.", e);
+        }
+
+        String resultXML = null;
+        try {
+            log.info("before convert to XML");
+            resultXML = convertCreatePDFResultToXML(result);
+            log.info("after convert to XML");
+        } catch (ParserConfigurationException | TransformerException e) {
+            throw new Exceptions.InternalServerErrorException("Error converting result to XML.", e);
+        }
+
+        log.info("XML: " + resultXML);*/
+
+        String contentType = ContentType.APPLICATION_XML.toString();	// We know the result is always PDF.
+        ServletUtils.validateAcceptHeader(request.getHeader(AcceptHeaders.ACCEPT_HEADER_STR), contentType);
+        response.setContentType(contentType);
+        try {
+            response.getWriter().write("<test><message>ok</message></test>");
+        } catch (IOException e) {
+            throw new Exceptions.InternalServerErrorException("Error writing XML to response.", e);
+        }
+
+    }
+
+    private static String convertCreatePDFResultToXML(CreatePDFResult createPDFResult) throws ParserConfigurationException, Exceptions.InternalServerErrorException, TransformerException {
+
+        DocumentBuilderFactory documentFactory = DocumentBuilderFactory.newInstance();
+        DocumentBuilder documentBuilder = documentFactory.newDocumentBuilder();
+        org.w3c.dom.Document document = documentBuilder.newDocument();
+        org.w3c.dom.Element root = document.createElement("createPDFResult");
+        document.appendChild(root);
+
+        createElementWithAttribute(document, root, "dataDoc", "value", toBase64String(createPDFResult.getCreatedDocument()));
+        createElementWithAttribute(document, root, "logDoc", "value", toBase64String(createPDFResult.getLogDocument()));
+
+        return domToString(document);
+    }
+
+    private static String domToString(org.w3c.dom.Document document)
+            throws TransformerConfigurationException, TransformerFactoryConfigurationError, TransformerException {
+        DOMSource domSource = new DOMSource(document);
+        Transformer transformer = TransformerFactory.newInstance().newTransformer();
+        StringWriter sw = new StringWriter();
+        StreamResult sr = new StreamResult(sw);
+        transformer.transform(domSource, sr);
+        return sw.toString();
+    }
+
+    private static void addMapOfResultDocInXml(String docName, Document resultDoc, org.w3c.dom.Document document, Element root) {
+        try {
+            Element result = document.createElement("resultDocument");
+            root.appendChild(result);
+            Attr attr = document.createAttribute("documentName");
+            attr.setValue(docName);
+            result.setAttributeNode(attr);
+            if (resultDoc != null) {
+                byte[] concatenatedPdf = null;
+                concatenatedPdf = IOUtils.toByteArray(resultDoc.getInputStream());
+                if (concatenatedPdf != null) {
+                    String doc = Base64.getEncoder().encodeToString(concatenatedPdf);
+                    Element generatedDoc = document.createElement("generatedDoc");
+                    generatedDoc.appendChild(document.createTextNode(doc));
+                    result.appendChild(generatedDoc);
+                }
+            }
+        } catch (IOException e) {
+            String msg = e.getMessage();
+            throw new IllegalStateException("Error while reading result document. (" + (msg == null ? e.getClass().getName() : msg) + ").", e);
+        }
+    }
+
+    private static String toBase64String(Document doc) throws Exceptions.InternalServerErrorException {
+        try {
+            return Base64.getEncoder().encodeToString(IOUtils.toByteArray(doc.getInputStream()));
+        } catch (IOException e) {
+            String msg = e.getMessage();
+            throw new Exceptions.InternalServerErrorException("Error while reading job log from assembler result. (" + (msg == null ? e.getClass().getName() : msg) + ").", e);
+        }
+    }
+
+    private static void createElementWithAttribute(org.w3c.dom.Document document, Element root, String parentElementName,
+                                                   String attributeName, String property) {
+        Element parentElement = document.createElement(parentElementName);
+        root.appendChild(parentElement);
+        Attr attr = document.createAttribute(attributeName);
+        attr.setValue(property);
+        parentElement.setAttributeNode(attr);
+
+    }
+
+    private static void createElementList(org.w3c.dom.Document document, org.w3c.dom.Element root,
+                                          String parentElementName, String childElementName, List<String> stringList) {
+        Element elementName = document.createElement(parentElementName);
+        root.appendChild(elementName);
+        if (CollectionUtils.isNotEmpty(stringList)) {
+            stringList.forEach(resultPropertyName -> createElement(document, elementName, childElementName,
+                    resultPropertyName));
+        }
+    }
+
+    private static void createElement(org.w3c.dom.Document document, Element Parent, String elementName,
+                                      String elementValue) {
+        Element element = document.createElement(elementName);
+        element.appendChild(document.createTextNode(elementValue));
+        Parent.appendChild(element);
     }
 
     private TraditionalGeneratePDFService getAdobeGeneratePDFService() {
@@ -141,7 +275,7 @@ public class CreatePDF2 extends SlingAllMethodsServlet {
             return this;
         }
 
-        public byte[] setXMPDoc() { return xmpDoc; }
+        public byte[] getXMPDoc() { return xmpDoc; }
 
         public ReaderExtensionsParameters setXMPDoc(byte[] xmpDoc) {
             this.xmpDoc = xmpDoc;
